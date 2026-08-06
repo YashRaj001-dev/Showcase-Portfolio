@@ -1,42 +1,63 @@
-# HR Data Cleaning — SQL (PostgreSQL)
+# HR Data Cleaning — Excel
 
-A data cleaning project practicing real-world messy data handling in PostgreSQL. Starts from a raw 1,000-row HR CSV full of common data-quality issues and produces a fully typed, cleaned table.
+A data cleaning project practicing real-world messy data handling in Excel. Same raw HR dataset used in the [SQL version](../HR_Data_Cleaning_Project) of this project, cleaned entirely with Excel formulas instead of SQL — showing the same problem-solving approach translated to a different tool.
 
 ## Files
 
 - `messy_HR_data.xlsx` — original raw dataset
-- `hr_clean.xlsx` — cleaned output
-- `cleaning_script.sql` — full SQL pipeline, from staging table to final cleaned table, with validation checks
+- `HR_Cleaned_Data.xlsx` — cleaned output
 
 ## Problems in the raw data
 
 | Column | Issue |
 |---|---|
-| `name` | Inconsistent leading/trailing whitespace (`grace` vs ` grace `) causing false duplicates |
-| `age` | Missing values represented as `'nan'`, `'NAN'`, `' NAN '`, or empty strings |
-| `salary` | Same missing-value inconsistency, plus a word-form value (`'SIXTY THOUSAND'`) mixed into an otherwise numeric column |
-| `joining_date` | Five different date formats mixed in a single column: `YYYY/MM/DD`, `MM/DD/YYYY`, `MM-DD-YYYY`, `YYYY.MM.DD`, and `Month D, YYYY` |
-| `email`, `phone_number` | Missing values inconsistently marked as `'nan'`, blank, or whitespace-only strings |
-| `gender`, `department`, `position`, `performance_score` | Checked for casing/whitespace/typo issues — confirmed clean, no changes needed |
+| `Name` | Inconsistent leading/trailing whitespace (`' grace '`) and lowercase casing, causing false duplicates |
+| `Age` | Missing values, plus a word-form value (`'thirty'`) mixed into an otherwise numeric column |
+| `Salary` | Missing values, plus a word-form value (`'SIXTY THOUSAND'`) mixed into an otherwise numeric column |
+| `Joining Date` | Five different date formats mixed in a single column: `YYYY/MM/DD`, `MM/DD/YYYY`, `MM-DD-YYYY`, `YYYY.MM.DD`, and `Month D, YYYY` |
+| `Email`, `Phone Number` | Missing values inconsistently marked |
+| `Gender`, `Department`, `Position`, `Performance Score` | Checked for casing/whitespace/typo issues — confirmed clean, no changes needed |
 
 ## Approach
 
-1. **Staging table** — loaded every column as `TEXT`, even ones that should eventually be numeric or date types. This avoids import failures caused by messy values that don't fit a strict type (e.g. loading `age` directly as `INT` would fail on the word-form values).
-2. **Investigation before transformation** — used `SELECT DISTINCT` and regex filters (`~`, `!~`) to catalog every distinct "bad" value before deciding how to fix it, rather than guessing.
-3. **Missing-value standardization** — collapsed all variants (`'nan'`, `'NAN'`, `' NAN '`, empty string) into real SQL `NULL` using `TRIM(UPPER(...))` comparisons.
-4. **Type coercion with `CASE`** — converted `age` and `salary` to numeric types, mapping the one identified word-form value (`'SIXTY THOUSAND'` → `60000`) explicitly rather than dropping it.
-5. **Multi-format date parsing** — since no single `TO_DATE` format string could parse the whole column, used a `CASE` block with regex pattern-matching to detect each row's format first, then applied the matching `TO_DATE(..., format)` call.
-6. **Validation** — after building the cleaned table, ran sanity checks (`MIN`/`MAX` on age, salary, and dates; a join-based check for any row where cleaning silently produced an unexpected `NULL`) to confirm nothing broke silently.
+1. **Name whitespace and casing** — used `=TRIM()` to strip leading/trailing spaces, combined with `=PROPER()` to fix casing, then pasted the results back as values.
+
+2. **Age and Salary word-form values** — since these columns needed to end up numeric, non-numeric entries like `'thirty'` and `'SIXTY THOUSAND'` were manually identified (by filtering for text within an otherwise numeric column) and mapped to their numeric equivalents (`30`, `60000`) before converting the column to a number format.
+
+3. **Multi-format date parsing** — the hardest part. Since `DATEVALUE()` alone doesn't recognize every format present (in particular, it fails on dot-separated dates like `2019.12.01`, returning `#VALUE!`), a nested `IF` formula was used to detect each row's format first, then parse it accordingly:
+
+   ```excel
+   =IF(ISNUMBER(SEARCH(".",G2)),
+       DATEVALUE(SUBSTITUTE(G2,".","-")),
+     IF(ISNUMBER(SEARCH("/",G2)),
+       IF(LEN(LEFT(G2,FIND("/",G2)-1))=4,
+         DATEVALUE(SUBSTITUTE(G2,"/","-")),
+         DATE(VALUE(RIGHT(G2,4)),VALUE(LEFT(G2,2)),VALUE(MID(G2,4,2)))
+       ),
+     IF(ISNUMBER(SEARCH("-",G2)),
+       DATE(VALUE(RIGHT(G2,4)),VALUE(LEFT(G2,2)),VALUE(MID(G2,4,2))),
+       DATEVALUE(G2)
+     ))
+   )
+   ```
+
+   - **Dot-separated (`YYYY.MM.DD`)** → dots swapped for dashes via `SUBSTITUTE`, then parsed with `DATEVALUE` (which reliably reads `YYYY-MM-DD` as year-first regardless of regional settings, unlike slash-separated dates)
+   - **Slash-separated** → checked whether the first segment is 4 digits long to distinguish `YYYY/MM/DD` from `MM/DD/YYYY`, then parsed accordingly
+   - **Dash-separated (`MM-DD-YYYY`)** → rebuilt manually with `DATE()`, `LEFT()`, `MID()`, `RIGHT()`
+   - **Text month format (`Month D, YYYY`)** → handled natively by `DATEVALUE()`, which understands this format out of the box
+
+4. **Missing values** — standardized inconsistent blank/placeholder markers (including whitespace-only cells) using Find & Replace with "Match entire cell contents" enabled, to avoid corrupting legitimate text containing spaces elsewhere in the sheet.
+
+5. **Validation** — checked row count preserved (1,000 → 1,000), confirmed numeric ranges for Age and Salary were sane after conversion, and spot-checked that every previously non-numeric Age/Salary value mapped to the correct number.
 
 ## Key techniques used
 
-- `TRIM()`, `UPPER()`, `INITCAP()` for whitespace/casing normalization
-- `CASE WHEN` for conditional value mapping and missing-value standardization
-- Regex operators `~` / `!~` for pattern detection and validation
-- `TO_DATE()` with format strings for parsing mixed date formats
-- Type casting (`::INT`, `::NUMERIC`) after cleaning text-based numeric columns
-- `CREATE TABLE ... AS SELECT` to materialize the cleaned dataset
+- `TRIM()`, `PROPER()` for whitespace and casing normalization
+- Nested `IF()` for conditional format detection, mirroring a SQL `CASE` statement
+- `DATEVALUE()`, `SUBSTITUTE()`, `DATE()`, `LEFT()`/`MID()`/`RIGHT()` for parsing inconsistent date formats
+- Find & Replace with "Match entire cell contents" for safely standardizing missing-value markers
+- Paste Special → Values to lock in formula results as static values
 
 ## Notes
 
-This was built as a hands-on SQL practice exercise — every transformation was verified with a `SELECT` preview before being applied in the final `CREATE TABLE hr_clean AS SELECT ...` statement, to avoid silently corrupting data.
+This project intentionally mirrors the [SQL version](../HR_Data_Cleaning_Project) of the same dataset, to demonstrate that the same data-cleaning logic (detect the problem, classify by pattern, apply the right transformation, validate) translates across tools — not just syntax in one language.
